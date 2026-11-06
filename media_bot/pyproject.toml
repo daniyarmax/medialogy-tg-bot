@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 
 dependencies = [
     "aiogram>=3.13,<4.0",
-    "yt-dlp>=2024.10.22",
+    "yt-dlp>=2026.10.26",
     "celery[redis]>=5.4,<6.0",
     "redis>=5.1,<6.0",
     "sqlalchemy[asyncio]>=2.0,<3.0",

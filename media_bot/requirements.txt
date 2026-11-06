@@ -2,7 +2,7 @@
 # Regenerate with `pip-compile pyproject.toml -o requirements.txt` once the project has
 # network access in CI; hand-pinned for now so Docker builds are reproducible offline.
 aiogram==3.13.1
-yt-dlp==2024.10.22
+yt-dlp==2026.10.26
 celery[redis]==5.4.0
 redis==5.1.1
 sqlalchemy[asyncio]==2.0.36
