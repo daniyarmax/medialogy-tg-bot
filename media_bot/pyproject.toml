@@ -1,0 +1,44 @@
+[project]
+name = "media-bot"
+version = "0.1.0"
+description = "Telegram media downloader and audio extractor"
+requires-python = ">=3.12"
+
+dependencies = [
+    "aiogram>=3.13,<4.0",
+    "yt-dlp>=2024.10.22",
+    "celery[redis]>=5.4,<6.0",
+    "redis>=5.1,<6.0",
+    "sqlalchemy[asyncio]>=2.0,<3.0",
+    "asyncpg>=0.29,<1.0",
+    "alembic>=1.13,<2.0",
+    "pydantic>=2.9,<3.0",
+    "pydantic-settings>=2.5,<3.0",
+    "structlog>=24.4,<25.0",
+    "python-dotenv>=1.0,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3,<9.0",
+    "pytest-asyncio>=0.24,<1.0",
+    "pytest-mock>=3.14,<4.0",
+    "pytest-cov>=5.0,<6.0",
+    "ruff>=0.7,<1.0",
+    "mypy>=1.13,<2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/integration"]
+markers = [
+    "load: long-running load/stress tests, not run by default (use --run-load)",
+]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
