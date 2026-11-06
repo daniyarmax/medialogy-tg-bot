@@ -55,7 +55,20 @@ or a manual check actually performed, not just that code was written.
 
 ## Phase 3 — Audio/FFmpeg Engine
 
-- **Status:** Not started
+- **Status:** Complete
+- **Date:** 2026-11-06
+- **What works (verified):**
+  - `app/processor/media_info.py`: `probe()` runs `ffprobe` as a subprocess and parses duration/audio-stream/video-presence/tags. Verified against 3 real checked-in fixtures (video+audio mp4, audio-only m4a, audio-only mp3) plus a missing-file error case.
+  - `app/processor/ffmpeg.py`: shared subprocess runner parsing `-progress` key=value blocks into percent-complete updates, with timeout enforcement (SIGTERM, then SIGKILL after a 5s grace period).
+  - `app/processor/audio_extractor.py`: `extract_audio()` for MP3/WAV/M4A/FLAC/OPUS. `needs_reencode()` is a pure function tested independently of ffmpeg (5 unit tests covering matching-codec/no-bitrate, bitrate-within-slack, real-downgrade, codec-mismatch, and lossless-format-ignores-bitrate cases).
+  - Installed **ffmpeg 9.0.2 via Homebrew** specifically so this phase could be verified against the real binary rather than mocked (per the "no mocks standing in for production code" constraint — this is integration-adjacent logic that has to be proven to actually run). Confirmed `libmp3lame`, `libopus`, `aac`, `flac`, `pcm_s16le`/`pcm_s24le` encoders are all present.
+  - Generated 3 tiny (37-76KB) checked-in test fixtures via `ffmpeg -f lavfi` (synthetic test pattern + sine tone), never downloaded real media: `sample_video.mp4` (3s, h264+aac), `sample_audio.m4a` (3s aac), `sample_audio.mp3` (3s mp3).
+  - 15 tests in `tests/unit/test_media_info.py` + `test_audio_extractor.py` all run **real ffmpeg subprocess calls** (not mocked) and pass, covering: video-to-mp3 extraction (video stream stripped), the copy-path (m4a→m4a, verified lossless — identical bitrate and duration to the source, unlike a real transcode which would drift), flac/opus/wav conversion with correct resulting codec, OPUS's forced 48kHz resample, and progress callbacks firing with percent reaching ≥90%.
+  - **Manual verification beyond the test suite:** ran `extract_audio()` by hand on the video fixture at 192kbps and independently cross-checked the output with a separate `ffprobe` invocation — confirmed `codec_name=mp3`, `bit_rate=192000`, `sample_rate=44100`, `duration=3.000000` exactly matching the request.
+  - **Manual timeout verification:** ran `extract_audio()` with an artificially tiny `timeout_seconds=0.001` against the video fixture — confirmed `ProcessingTimeoutError` was raised quickly (0.06s, not hung) and `ps aux` showed **no orphaned ffmpeg process** afterward, proving the SIGTERM/SIGKILL escalation actually kills the subprocess rather than just raising while it keeps running in the background.
+  - `pytest tests/unit tests/integration -v` → **55/55 passed**.
+- **Known gaps:** None for this phase's scope.
+- **Next phase prerequisites:** None blocking.
 
 ## Phase 4 — Telegram Bot (aiogram 3)
 
