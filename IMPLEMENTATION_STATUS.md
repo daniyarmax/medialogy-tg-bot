@@ -36,7 +36,22 @@ or a manual check actually performed, not just that code was written.
 
 ## Phase 2 — Downloader (yt-dlp)
 
-- **Status:** Not started
+- **Status:** Complete
+- **Date:** 2026-11-06
+- **What works (verified):**
+  - `app/downloader/platform_detector.py`: explicit host allowlist for YouTube/Instagram/TikTok/Facebook/X(Twitter)/Reddit, feeding `validate_source_url`'s `allowed_hosts`. 14 unit tests cover every platform's recognized domains plus rejection of unsupported hosts/malformed URLs.
+  - `app/downloader/metadata.py`: `probe_metadata()` runs `yt-dlp -J --no-playlist` as a subprocess (JSON parse, no download), validating the URL first. 4 unit tests (mocked subprocess + mocked DNS) cover success parsing, unsupported-platform rejection, non-zero exit, and timeout (confirmed the process is actually killed on timeout).
+  - `app/downloader/ytdlp_client.py`: `download()` runs the real yt-dlp download subprocess, disk-to-disk, with line-oriented progress parsing and `--continue` for resumability. 5 unit tests (mocked subprocess) cover progress streaming, oversized-file rejection, network timeout, SSRF-blocked URL (confirmed the subprocess is **never spawned** for a disallowed host), and missing-output-file detection.
+  - **Real-network manual verification** (not mocked) against `https://www.youtube.com/watch?v=jNQXAC9IVRw` ("Me at the zoo", 19s — public, legally accessible, tiny):
+    - `probe_metadata()` returned the correct title, platform, 19s duration, uploader, and 24 real formats.
+    - `download()` fetched format `134` end-to-end: progress callback fired 10 times with percent climbing 0.3% → 100%, and the resulting file's size (322379 bytes) matched the probed `filesize_bytes` exactly.
+  - **Two real bugs found and fixed via this live verification** (would not have been caught by mocked tests alone):
+    1. yt-dlp silently suppresses all `--progress-template` output when stdout isn't a TTY (our subprocess pipe) unless `--progress` is also passed — zero progress lines were being emitted at all until this was added.
+    2. `%(progress.total_bytes_estimate)s` is frequently `"NA"`; `%(progress.total_bytes)s` is now also requested and tried first.
+  - Also upgraded the pinned `yt-dlp` from `2024.10.22` (originally spec'd) to `2026.10.26` after discovering the old version could no longer extract any YouTube formats at all — yt-dlp requires frequent updates to track upstream platform changes; **noted as an operational concern for Phase 7 deployment** (the worker image should pin a recent yt-dlp and this should be revisited periodically).
+  - `pytest tests/unit tests/integration -v` → **39/39 passed**.
+- **Known gaps:** None for this phase's scope. Format *selection* for multi-stream (video-only + audio-only) formats requiring an ffmpeg mux was not exercised locally (ffmpeg isn't installed outside Docker on this dev machine) — muxed-format download will be exercised once Phase 3 (ffmpeg) and the worker Docker image are in place.
+- **Next phase prerequisites:** None blocking.
 
 ## Phase 3 — Audio/FFmpeg Engine
 
