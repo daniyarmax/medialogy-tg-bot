@@ -1,0 +1,19 @@
+# The bot process only talks to Telegram and Postgres/Redis — it never touches
+# media bytes directly (downloads/processing happen in the worker container),
+# so this image deliberately has no ffmpeg/yt-dlp to keep it small.
+FROM python:3.12-slim
+
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini .
+
+USER appuser
+
+CMD ["python", "-m", "app.main"]
