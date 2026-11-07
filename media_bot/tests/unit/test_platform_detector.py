@@ -30,8 +30,12 @@ def test_detect_platform_rejects_unsupported_host() -> None:
 
 
 def test_detect_platform_rejects_url_with_no_host() -> None:
-    with pytest.raises(UnsupportedPlatformError):
+    # Real case this guards: a user typing plain text ("extract audio")
+    # instead of sending a link deserves a clearer message than the
+    # generic "unsupported platform" one.
+    with pytest.raises(UnsupportedPlatformError) as exc_info:
         detect_platform("not-a-url")
+    assert "doesn't look like a link" in exc_info.value.user_message
 
 
 def test_all_allowed_hosts_covers_every_platform() -> None:

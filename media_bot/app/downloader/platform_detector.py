@@ -43,7 +43,13 @@ def detect_platform(url: str) -> Platform:
     """Return the `Platform` a URL belongs to, or raise `UnsupportedPlatformError`."""
     host = (urlsplit(url).hostname or "").lower()
     if not host:
-        raise UnsupportedPlatformError(f"URL has no host: {url!r}")
+        # Distinct from "a real URL, just an unsupported site" - this is
+        # typically plain text (a typo, a stray word) with no scheme/host
+        # at all, which needs a clearer nudge than the generic message.
+        raise UnsupportedPlatformError(
+            f"URL has no host: {url!r}",
+            user_message="That doesn't look like a link. Please send a direct URL.",
+        )
 
     for platform, bases in PLATFORM_HOSTS.items():
         if _host_matches(host, bases):
