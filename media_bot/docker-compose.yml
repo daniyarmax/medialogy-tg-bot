@@ -10,8 +10,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # No published host port: only containers on this Compose network need
+    # to reach Postgres, and not exposing a DB port to the host is better
+    # practice anyway. (Also avoids colliding with a host Postgres, if any.)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-media_bot}"]
       interval: 5s
@@ -23,8 +24,7 @@ services:
     restart: unless-stopped
     volumes:
       - redisdata:/data
-    ports:
-      - "6379:6379"
+    # No published host port - same reasoning as postgres above.
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -36,7 +36,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.bot
     restart: unless-stopped
-    env_file: .env
+    env_file: .env.docker
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,7 +49,7 @@ services:
       dockerfile: docker/Dockerfile.worker
     restart: unless-stopped
     command: ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "downloads", "--concurrency=4", "--loglevel=INFO"]
-    env_file: .env
+    env_file: .env.docker
     volumes:
       - storage:/storage
     depends_on:
@@ -64,7 +64,7 @@ services:
       dockerfile: docker/Dockerfile.worker
     restart: unless-stopped
     command: ["celery", "-A", "app.workers.celery_app", "worker", "-Q", "processing,maintenance", "--concurrency=2", "--loglevel=INFO"]
-    env_file: .env
+    env_file: .env.docker
     volumes:
       - storage:/storage
     depends_on:
@@ -79,7 +79,7 @@ services:
       dockerfile: docker/Dockerfile.worker
     restart: unless-stopped
     command: ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=INFO"]
-    env_file: .env
+    env_file: .env.docker
     depends_on:
       postgres:
         condition: service_healthy

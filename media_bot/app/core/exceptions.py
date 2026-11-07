@@ -9,9 +9,13 @@ class MediaBotError(Exception):
     user_message: str = "Something went wrong. Please try again later."
 
     def __init__(self, detail: str | None = None, *, user_message: str | None = None) -> None:
-        super().__init__(detail or self.user_message)
         if user_message is not None:
             self.user_message = user_message
+        # Set self.user_message *before* this, since str(exc)/the traceback
+        # falls back to it when no technical `detail` is given - otherwise
+        # a custom user_message passed via kwarg never shows up in logs,
+        # only the generic class-level default does.
+        super().__init__(detail or self.user_message)
 
 
 class UnsupportedPlatformError(MediaBotError):

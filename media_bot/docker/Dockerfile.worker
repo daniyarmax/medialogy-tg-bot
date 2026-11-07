@@ -19,7 +19,7 @@ COPY alembic.ini .
 COPY scripts ./scripts
 
 RUN mkdir -p /storage/downloads /storage/processed /storage/temp \
-    && chown -R appuser:appuser /storage
+    && chown -R appuser:appuser /storage /app
 
 USER appuser
 

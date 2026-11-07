@@ -3,7 +3,7 @@
 # network access in CI; hand-pinned for now so Docker builds are reproducible offline.
 aiogram==3.13.1
 yt-dlp==2026.10.26
-celery[redis]==5.4.0
+celery[redis]==5.7.0
 redis==8.1.0
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.29.0
