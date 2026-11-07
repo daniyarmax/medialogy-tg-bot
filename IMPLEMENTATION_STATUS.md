@@ -165,4 +165,26 @@ or a manual check actually performed, not just that code was written.
 
 ## Phase 8 — Documentation & Full Test Suite Pass
 
-- **Status:** Not started
+- **Status:** Complete
+- **Date:** 2026-11-07
+- **What works (verified):**
+  - `tests/README.md` documents the three test tiers (unit/integration/load) and how to run each.
+  - `README.md` and `IMPLEMENTATION_STATUS.md` are both finalized with real, accurate content throughout — no placeholder sections remain.
+  - `pytest tests/unit tests/integration -v` → **111/111 passed**.
+  - `pytest tests/load -v` → **1/1 passed** (run separately, as documented), peak ffmpeg RSS 16.3MB (10s clip) vs 16.8MB (2h clip) — reconfirmed flat.
+  - **Final live UX walkthrough against the real, fully-Dockerized `@medialogy_bot`**, covering every item in the original spec:
+    - `/start`, full video-download flow (quality picker, live progress edits, delivery), full audio-extraction flow (format+bitrate pickers, delivery), `/cancel` (with real `SIGTERM` revocation), and the "file too large" path — all live-verified repeatedly across Phases 4-7.
+    - `/help`, `/status`, `/settings`, and "📁 My Downloads" — walked through live in this final pass. `/settings` is independently confirmed via direct DB evidence (the `users` row's `updated_at` moved and reflects a real write, correlating with the live test); the rest were user-confirmed working, with bot logs showing continuous update handling with no errors during the window.
+    - This walkthrough surfaced one real (minor) UX bug: typing plain text instead of sending a link produced the same generic "unsupported platform" message as an actually-unsupported site's URL would, which is confusing — fixed by giving the "not a URL at all" case its own clearer message ("That doesn't look like a link...").
+- **Known gaps:** None for this phase's scope. The two carried-over gaps from Phase 7 (Local Bot API Server live verification needing the user's own `my.telegram.org` credentials; a precisely-timed mid-download worker-kill drill) remain open as documented there — nothing in Phase 8 was blocked by them.
+- **Next phase prerequisites:** None — this was the last planned phase.
+
+## Project status: all 8 planned phases complete
+
+Every phase in the original plan (scaffolding → core infra → downloader → audio engine →
+Telegram bot → background processing → reliability/security hardening → deployment →
+documentation) is done and live-verified against a real Telegram bot, a real Celery worker
+stack (both on the host and fully inside Docker), real yt-dlp/ffmpeg, and real Postgres/Redis.
+The two remaining open items (Local Bot API Server live test; a cleanly-captured mid-download
+crash-recovery drill) are explicitly documented above rather than glossed over, and both are
+narrow, well-scoped follow-ups rather than blockers to normal operation.
