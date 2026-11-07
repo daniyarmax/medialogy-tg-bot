@@ -94,7 +94,30 @@ or a manual check actually performed, not just that code was written.
 
 ## Phase 5 — Background Processing (Celery + Redis)
 
-- **Status:** Not started
+- **Status:** Complete
+- **Date:** 2026-11-07
+- **What works (verified):**
+  - `app/workers/celery_app.py`: Celery app, 3-queue routing (`downloads`/`processing`/`maintenance`), `task_failure`/`task_revoked` signal hooks writing Postgres as a crash-recovery backstop.
+  - `app/workers/tasks.py`: `download_video_task`/`extract_audio_task` with the plan's exact retry policy (acks_late, reject_on_worker_lost, exponential backoff+jitter on transient errors, 4/2 max retries), plus Beat-scheduled `cleanup_temp_task` (15 min) and `reconcile_stale_tasks` (5 min).
+  - `app/services/download_service.py`, `audio_service.py`: the real orchestration — download/extract, probe final dimensions, upload to Telegram, record `DownloadHistory`, mark the Task row Completed/Failed. Idempotent (skips if already `Completed`, matching a redelivered-task scenario).
+  - `app/services/progress_publisher.py` + `app/bot/progress_poller.py`: workers publish progress to a short-TTL Redis hash; the bot polls it and edits the tracking message through the existing throttle logic from Phase 4.
+  - `/cancel` (`handlers/status.py`) now calls `celery_app.control.revoke(..., terminate=True)` in addition to the DB write.
+  - `docker-compose.yml` rounded out with `bot`/`celery-worker-download`/`celery-worker-processing`/`celery-beat` + a shared `storage` volume (YAML-validated via PyYAML; `docker compose up` itself still unverified — see gap below).
+  - **95/95 automated tests pass**, including a new `tests/integration/test_celery_tasks.py` that runs the real orchestration functions against real yt-dlp, real ffmpeg, and real Postgres (only the Telegram `Bot.send_video`/`send_audio` calls are mocked, specifically so the test suite itself never spams a real chat).
+  - **Full real end-to-end live verification**, with a real Celery worker, real Telegram bot, and the user actively testing in Telegram across many iterations. Confirmed working: real download → real Telegram delivery with correct playback (see bugs below), real audio extraction → real delivery, `FileTooLargeError` correctly failing (not retrying) and notifying the user when output exceeds the upload limit, and `/cancel` actually sending `SIGTERM` to the running subprocess (confirmed via `ps` showing no orphaned yt-dlp/ffmpeg process afterward) with the DB correctly landing on `Cancelled`.
+  - This live run surfaced and fixed **six real bugs** that the automated test suite alone did not catch (each is a `grep`-able commit message for detail, summarized here):
+    1. `redis-py` 5.1.1 was incompatible with Celery 5.4's kombu Redis transport (needs ≥6.1.0) — upgraded to 8.1.0.
+    2. `TaskRepository.set_status()` didn't accept `result_file_path`/`result_file_size_bytes`, which both services pass on completion.
+    3. A genuine race: the bot dispatched to Celery *before* its own admitting transaction committed, so the worker's separate DB connection couldn't see the Task row yet under READ COMMITTED (`download_task_missing`). Fixed by committing before `celery_app.send_task`.
+    4. macOS's prefork pool defaults to `spawn`, which crashed every task (`not enough values to unpack`) because billiard's fast-path tracer needs fork-inherited memory. Fixed via `billiard.context._force_start_method("fork")` — billiard has its own process context, separate from stdlib `multiprocessing`, which has zero effect on it. (The Linux/Docker production target defaults to `fork` already and never hits this — confirmed this is purely a macOS-dev-environment issue.) This also restored `terminate=True` revocation, which silently no-ops under `--pool=solo` (no child process exists to signal).
+    5. A merged-not-re-encoded VP9-in-MP4 video played as audio-only/black-screen specifically in the Telegram desktop client (confirmed: played fine in QuickTime/native players). Fixed by preferring H.264 (avc1) over VP9/AV1 per resolution in `curate_video_formats`, falling back to VP9 only when no avc1 option exists at that height.
+    6. Telegram's player rendered the video frame as square *during actual playback* (not just the thumbnail). Fixed by probing the real merged file's width/height/duration via ffprobe (extended `media_info.py` with `VideoStreamInfo`) and passing them explicitly to `bot.send_video`, plus `--postprocessor-args "Merger:-movflags +faststart"` to move the moov atom to the front.
+  - Also widened `tasks.requested_format` from `VARCHAR(20)` to `VARCHAR(100)` after a real format selector string didn't fit — caught by the new integration test, with a real Alembic migration applied and `alembic check` confirming no drift.
+- **Known gaps:**
+  - `docker compose up` itself is still **unverified** — Docker Desktop's CLI (`docker ps`/`docker info`) remained unresponsive for this entire multi-hour session (checked repeatedly) despite its underlying VM process running. All verification above used local Homebrew Postgres/Redis plus directly-run `python -m app.main` / `celery worker` processes instead. **Follow-up:** once Docker Desktop is restarted and responsive, run `docker compose up -d` and repeat the end-to-end Telegram test before relying on the Compose file.
+  - A `SIGTERM`-cancelled task leaves its partial download file behind (its own `finally` cleanup never runs when forcibly killed) — confirmed live. This is expected and already covered by the periodic `cleanup_temp_task` (sweeps anything older than `TEMP_FILE_TTL_HOURS`), just not immediately. Phase 6 could tighten this if immediate cleanup on cancellation matters.
+  - Full crash-recovery drill (kill a worker *mid-task*, confirm `reconcile_stale_tasks` or broker redelivery resumes/cleanly fails it) was reasoned through and partially exercised via the `/cancel` SIGTERM test, but not run as its own dedicated live drill. Reasonable to fold into Phase 6's reliability hardening pass.
+- **Next phase prerequisites:** None blocking.
 
 ## Phase 6 — Reliability, Large-File & Security Hardening
 
