@@ -72,7 +72,25 @@ or a manual check actually performed, not just that code was written.
 
 ## Phase 4 — Telegram Bot (aiogram 3)
 
-- **Status:** Not started
+- **Status:** Complete
+- **Date:** 2026-11-07
+- **What works (verified):**
+  - `telegram_client.py`: Standard/Local Bot API abstraction (`build_bot()` + `TelegramLimits`). Validated against the real Telegram API (`bot.get_me()` confirmed the token resolves to `@medialogy_bot`).
+  - `keyboards/`: main menu, quality picker (dedupes by resolution, picks `+bestaudio` for video-only formats), audio format/bitrate pickers. 10 unit tests.
+  - `handlers/`: start/help, download (URL probe → quality picker → task admission), audio (URL or sent file → format/bitrate picker → task admission), status/cancel/my-downloads, settings. 8 unit tests for status/settings handlers (mocked repos).
+  - `middlewares/`: DB session injection, Redis-backed rate limiting (4 integration tests against **real local Redis**), structlog context binding.
+  - `services/task_service.py`: the shared admission-control + Task-creation gate. 3 integration tests against **real local Postgres** (creates pending task, rejects over the concurrency limit, allows a new task once an old one completes).
+  - `progress_tracker.py`: pure throttle/render logic, 7 unit tests (no I/O).
+  - **Full live verification against a real Telegram bot** (not mocked): got a real bot token from the user via @BotFather, validated it, ran the actual `python -m app.main` polling loop, and the user interacted with `@medialogy_bot` directly in Telegram.
+    - Sent a real `youtu.be` link with tracking params → probed via real yt-dlp → quality keyboard shown → tapped a quality → confirmed via `psql` a real `tasks` row landed in Postgres: `operation=download_video`, `requested_format=243+bestaudio`, `status=Pending`, correct `source_url`/`platform`.
+    - Used the Extract Audio flow on the same link → format picker (MP3) → bitrate picker (128kbps) → confirmed a second real `tasks` row: `operation=extract_audio`, `requested_format=mp3`, `requested_bitrate=128k`.
+    - A real `users` row was created for the actual Telegram account that messaged the bot (telegram_user_id captured correctly).
+  - **Two real bugs found and fixed via this live run** (neither would have been caught by unit tests alone, since they only manifest when wiring the whole app together):
+    1. `main.py` had `settings = get_settings()` shadowing the imported `app.bot.handlers.settings` module — crashed on startup with `AttributeError: 'Settings' object has no attribute 'router'`. Fixed by aliasing the import (`from app.bot.handlers import settings as settings_handlers`).
+    2. The download-URL handler only fired while FSM state was `DownloadFlow.waiting_for_url` — a user who pastes a link directly (without first tapping "Download Video") got silently ignored (`Update ... is not handled` in logs). Fixed by adding a `StateFilter(None)` fallback: a bare link in the default state is now treated the same as pressing the button first. Also hit and fixed a `FileNotFoundError: yt-dlp` when the bot process's `PATH` didn't include the venv's `bin/` — documented as a deployment note (the Docker worker image installs yt-dlp/ffmpeg system-wide so this won't recur there).
+  - `pytest tests/unit tests/integration -v` → **88/88 passed**.
+- **Known gaps:** `/settings`, `/help`, and "📁 My Downloads" were exercised only by unit tests with mocked repos, not live in Telegram during this session (the core flows — download and audio-extraction task creation — were the ones live-verified). Local Bot API Server mode (`TELEGRAM_API_MODE=local`) is implemented but untested — deferred to Phase 7, which requires the operator's own `my.telegram.org` credentials.
+- **Next phase prerequisites:** None blocking. Phase 5 (Celery) will wire real dispatch — currently a created Task sits in `Pending` with nothing picking it up.
 
 ## Phase 5 — Background Processing (Celery + Redis)
 
