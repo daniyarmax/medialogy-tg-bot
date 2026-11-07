@@ -58,11 +58,21 @@ The project uses **two separate env files**, not one:
   the corresponding `DATABASE_URL`/`CELERY_BROKER_URL`/etc. `docker-compose.yml` already points
   every service's `env_file:` at `.env.docker`.
 
+**Always pass `--env-file .env.docker`** when invoking `docker compose` for this project. This is
+separate from (and easy to confuse with) the `env_file:` entries inside `docker-compose.yml`:
+those only control what env vars land *inside each container*. Compose also does its own `${VAR}`
+substitution while *parsing* `docker-compose.yml` itself (e.g. `TELEGRAM_API_ID: ${LOCAL_BOT_API_ID}`,
+`POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}`), and that substitution reads from `.env` by default —
+**not** `.env.docker` — regardless of what `env_file:` says. Without `--env-file .env.docker`,
+those substitutions silently resolve to empty strings instead of erroring (bitten by this once:
+`telegram-bot-api` started fine but logged `expected TELEGRAM_API_ID ... env vars to be set` in a
+loop, because `LOCAL_BOT_API_ID`/`LOCAL_BOT_API_HASH` only exist in `.env.docker`).
+
 Bring the stack up:
 
 ```sh
-docker compose up -d --build postgres redis bot celery-worker-download celery-worker-processing celery-beat
-docker compose exec bot python -m alembic upgrade head   # first run / after a schema change
+docker compose --env-file .env.docker up -d --build postgres redis bot celery-worker-download celery-worker-processing celery-beat
+docker compose --env-file .env.docker exec bot python -m alembic upgrade head   # first run / after a schema change
 ```
 
 Note: `postgres`/`redis` deliberately don't publish ports to the host (only containers on the
@@ -75,9 +85,9 @@ Check everything's healthy: `docker compose ps` (postgres/redis show `(healthy)`
 To fully reset (fresh volumes, re-run migrations from scratch):
 
 ```sh
-docker compose down -v
-docker compose up -d --build postgres redis bot celery-worker-download celery-worker-processing celery-beat
-docker compose exec bot python -m alembic upgrade head
+docker compose --env-file .env.docker down -v
+docker compose --env-file .env.docker up -d --build postgres redis bot celery-worker-download celery-worker-processing celery-beat
+docker compose --env-file .env.docker exec bot python -m alembic upgrade head
 ```
 
 ### Scaling workers
@@ -85,8 +95,8 @@ docker compose exec bot python -m alembic upgrade head
 `celery-worker-download` and `celery-worker-processing` are separate services precisely so a
 long transcode can't starve a quick download (or vice versa) — bump `--concurrency` in their
 `command:` in `docker-compose.yml`, or run multiple replicas of either with
-`docker compose up -d --scale celery-worker-download=3` (remove the fixed container name if you
-do this often).
+`docker compose --env-file .env.docker up -d --scale celery-worker-download=3` (remove the fixed
+container name if you do this often).
 
 ## Large files: Local Bot API Server
 
@@ -100,16 +110,16 @@ ceiling on any single request regardless of mode).
 2. In `.env.docker`, set `TELEGRAM_API_MODE=local`, `LOCAL_BOT_API_ID=<api_id>`,
    `LOCAL_BOT_API_HASH=<api_hash>`.
 3. Start the local API server alongside everything else:
-   `docker compose --profile local-api up -d --build`
+   `docker compose --env-file .env.docker --profile local-api up -d --build`
 4. Restart the bot/worker services so they pick up the new `TELEGRAM_API_MODE`:
-   `docker compose restart bot celery-worker-download celery-worker-processing`
+   `docker compose --env-file .env.docker restart bot celery-worker-download celery-worker-processing`
 
 This mode shares a Docker volume between the local API server and the bot/workers, so large files
 can be handed off by local path instead of re-uploaded over loopback HTTP.
 
-> **Not yet live-verified** in this project (needs your own `my.telegram.org` credentials) — the
-> code path is implemented and the Standard-API path has been extensively live-tested, but switch
-> carefully and watch the logs the first time you use `local` mode.
+Remember the `--env-file .env.docker` flag here especially — without it, `TELEGRAM_API_ID`/
+`TELEGRAM_API_HASH` silently resolve to empty and `telegram-bot-api` loops on
+`expected TELEGRAM_API_ID or TELEGRAM_API_ID_FILE env vars to be set` (see the note above).
 
 ## Limits
 
