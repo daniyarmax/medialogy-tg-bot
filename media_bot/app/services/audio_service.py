@@ -38,8 +38,11 @@ async def run_extract_audio_task(task_id: str) -> None:
         if task is None:
             logger.warning("audio_task_missing", task_id=task_id)
             return
-        if task.status == TaskStatus.completed:
-            logger.info("audio_task_already_completed", task_id=task_id)
+        if task.status in (TaskStatus.completed, TaskStatus.cancelled):
+            # See the matching comment in download_service.py - excludes
+            # Failed deliberately, since Celery's own autoretry re-runs
+            # this exact function after setting status to Failed.
+            logger.info("audio_task_already_terminal", task_id=task_id, status=task.status.value)
             return
 
         user = await UserRepository(session).get(task.user_id)

@@ -39,10 +39,16 @@ async def run_download_video_task(task_id: str) -> None:
         if task is None:
             logger.warning("download_task_missing", task_id=task_id)
             return
-        if task.status == TaskStatus.completed:
-            # Idempotency: a previous attempt already finished but its ack
-            # was lost (worker crash) and the broker redelivered the task.
-            logger.info("download_task_already_completed", task_id=task_id)
+        if task.status in (TaskStatus.completed, TaskStatus.cancelled):
+            # Idempotency: either a previous attempt already finished but
+            # its ack was lost (worker crash) and the broker redelivered
+            # the task, or the user cancelled it after it was re-queued by
+            # reconciliation but before a worker picked the message back
+            # up - either way, don't resurrect it. (Deliberately excludes
+            # Failed: Celery's own autoretry re-runs this exact function
+            # after setting status to Failed, so skipping on Failed would
+            # break legitimate retries.)
+            logger.info("download_task_already_terminal", task_id=task_id, status=task.status.value)
             return
 
         user = await UserRepository(session).get(task.user_id)

@@ -98,7 +98,7 @@ def cleanup_temp_task() -> dict:
     return {"removed": removed}
 
 
-async def _reconcile_stale_tasks_async() -> dict:
+async def reconcile_stale_tasks_async() -> dict:
     """Scans Postgres directly (independent of Celery/broker state) for
     tasks stuck mid-stage whose `updated_at` hasn't moved — catches both a
     worker that died without triggering acks_late redelivery, and a task
@@ -146,4 +146,4 @@ async def _reconcile_stale_tasks_async() -> dict:
 
 @celery_app.task(name="tasks.reconcile_stale_tasks", queue="maintenance")
 def reconcile_stale_tasks() -> dict:
-    return run_async(_reconcile_stale_tasks_async)
+    return run_async(reconcile_stale_tasks_async)

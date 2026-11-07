@@ -17,4 +17,6 @@ storage/temp/*
 !storage/processed/.gitkeep
 !storage/temp/.gitkeep
 
+backups/
+
 .DS_Store

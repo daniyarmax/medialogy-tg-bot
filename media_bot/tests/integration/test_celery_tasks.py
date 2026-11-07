@@ -109,6 +109,40 @@ async def test_run_download_video_task_end_to_end(session, monkeypatch: pytest.M
     assert any(h.task_id == task.id for h in history)
 
 
+async def test_run_download_video_task_skips_a_cancelled_task(
+    session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Real bug this guards against: reconcile_stale_tasks re-queues a
+    # Celery message for a task, the user cancels it in the meantime
+    # (status -> Cancelled), then the redelivered message finally reaches
+    # a worker - it must not resurrect and actually process it.
+    stub_bot = _stub_bot()
+    monkeypatch.setattr(
+        download_service, "build_bot", lambda settings: (stub_bot, _fake_limits())
+    )
+
+    user_repo = UserRepository(session)
+    task_repo = TaskRepository(session)
+    user = await user_repo.get_or_create(920_000_005, username="celery_test_user5")
+    task = await task_repo.create(
+        Task(
+            user_id=user.id,
+            operation=TaskOperation.download_video,
+            source_url=_REAL_URL,
+            platform="youtube",
+            requested_format="160",
+            status=TaskStatus.cancelled,
+        )
+    )
+    await session.commit()
+
+    await download_service.run_download_video_task(str(task.id))
+
+    stub_bot.send_video.assert_not_awaited()
+    await session.refresh(task)
+    assert task.status == TaskStatus.cancelled  # untouched
+
+
 async def test_run_download_video_task_marks_failed_on_bad_format(
     session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
