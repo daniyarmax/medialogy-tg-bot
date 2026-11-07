@@ -1,0 +1,67 @@
+"""Builds the quality-picker keyboard shown after a video URL is probed.
+
+Modern platforms (YouTube especially) frequently no longer serve
+pre-muxed video+audio formats — most video-only streams need a separate
+best-audio stream merged in via ffmpeg. `curate_video_formats` dedupes by
+height (there are often 3-4 near-duplicate formats per resolution) and
+`format_selector_for` decides whether the chosen format needs `+bestaudio`.
+"""
+
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+from app.downloader.metadata import FormatOption
+
+CALLBACK_PREFIX = "dlfmt"
+MAX_QUALITY_OPTIONS = 6
+
+
+def _human_size(num_bytes: int | None) -> str:
+    if not num_bytes:
+        return ""
+    for unit in ("B", "KB", "MB", "GB"):
+        if num_bytes < 1024:
+            return f"{num_bytes:.0f}{unit}"
+        num_bytes /= 1024
+    return f"{num_bytes:.1f}TB"
+
+
+def curate_video_formats(formats: list[FormatOption]) -> list[FormatOption]:
+    """Pick the single best format per resolution, highest resolution first."""
+    best_by_height: dict[int, FormatOption] = {}
+    for fmt in formats:
+        if not fmt.has_video or fmt.height is None:
+            continue
+        current = best_by_height.get(fmt.height)
+        current_size = (current.filesize_bytes or 0) if current else -1
+        if current is None or (fmt.filesize_bytes or 0) > current_size:
+            best_by_height[fmt.height] = fmt
+
+    ordered = sorted(best_by_height.values(), key=lambda f: f.height or 0, reverse=True)
+    return ordered[:MAX_QUALITY_OPTIONS]
+
+
+def format_selector_for(fmt: FormatOption) -> str:
+    """The yt-dlp format-selector string to actually request this quality."""
+    return format_selector_for_id(fmt.format_id, fmt.has_audio)
+
+
+def format_selector_for_id(format_id: str, has_audio: bool) -> str:
+    """Same as `format_selector_for`, but from the bare fields worth
+    round-tripping through FSM state (we don't need to carry the whole
+    `FormatOption` across the probe -> callback boundary).
+    """
+    return format_id if has_audio else f"{format_id}+bestaudio"
+
+
+def build_quality_keyboard(formats: list[FormatOption]) -> InlineKeyboardMarkup:
+    curated = curate_video_formats(formats)
+    rows = []
+    for fmt in curated:
+        label = f"{fmt.height}p"
+        size = _human_size(fmt.filesize_bytes)
+        if size:
+            label += f" · ~{size}"
+        rows.append(
+            [InlineKeyboardButton(text=label, callback_data=f"{CALLBACK_PREFIX}:{fmt.format_id}")]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)

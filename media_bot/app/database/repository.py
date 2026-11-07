@@ -61,6 +61,14 @@ class TaskRepository:
         )
         return len(result.scalars().all())
 
+    async def list_active_for_user(self, user_id: int) -> list[Task]:
+        result = await self.session.execute(
+            select(Task)
+            .where(Task.user_id == user_id, Task.status.in_(ACTIVE_TASK_STATUSES))
+            .order_by(Task.created_at.desc())
+        )
+        return list(result.scalars().all())
+
     async def set_status(
         self,
         task_id: uuid.UUID,
