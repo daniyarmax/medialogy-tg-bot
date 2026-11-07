@@ -16,6 +16,15 @@ async def test_probe_video_fixture_reports_video_and_audio_streams() -> None:
     assert info.audio.codec_name == "aac"
     assert info.duration_seconds is not None
     assert 2.5 < info.duration_seconds < 3.5
+    assert info.video is not None
+    assert info.video.codec_name == "h264"
+    assert info.video.width == 320
+    assert info.video.height == 240
+
+
+async def test_probe_audio_only_fixture_has_no_video_stream_info() -> None:
+    info = await probe(FIXTURES / "sample_audio.mp3")
+    assert info.video is None
 
 
 async def test_probe_audio_only_m4a_fixture() -> None:

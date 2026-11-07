@@ -20,11 +20,19 @@ class AudioStreamInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class VideoStreamInfo:
+    codec_name: str | None
+    width: int | None
+    height: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class MediaInfo:
     path: Path
     duration_seconds: float | None
     format_name: str | None
     audio: AudioStreamInfo | None
+    video: VideoStreamInfo | None
     has_video: bool
     tags: dict[str, str]
 
@@ -68,7 +76,8 @@ async def probe(path: Path, *, timeout_seconds: float = 30.0) -> MediaInfo:
     streams = raw.get("streams", [])
 
     audio_stream = next((s for s in streams if s.get("codec_type") == "audio"), None)
-    has_video = any(s.get("codec_type") == "video" for s in streams)
+    video_stream = next((s for s in streams if s.get("codec_type") == "video"), None)
+    has_video = video_stream is not None
 
     audio_info = None
     if audio_stream is not None:
@@ -79,6 +88,14 @@ async def probe(path: Path, *, timeout_seconds: float = 30.0) -> MediaInfo:
             bit_rate=int(audio_stream["bit_rate"]) if audio_stream.get("bit_rate") else None,
         )
 
+    video_info = None
+    if video_stream is not None:
+        video_info = VideoStreamInfo(
+            codec_name=video_stream.get("codec_name"),
+            width=video_stream.get("width"),
+            height=video_stream.get("height"),
+        )
+
     duration_raw = fmt.get("duration") or (audio_stream or {}).get("duration")
 
     return MediaInfo(
@@ -86,6 +103,7 @@ async def probe(path: Path, *, timeout_seconds: float = 30.0) -> MediaInfo:
         duration_seconds=float(duration_raw) if duration_raw is not None else None,
         format_name=fmt.get("format_name"),
         audio=audio_info,
+        video=video_info,
         has_video=has_video,
         tags={k: str(v) for k, v in fmt.get("tags", {}).items()},
     )

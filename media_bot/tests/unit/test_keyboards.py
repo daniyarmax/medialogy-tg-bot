@@ -34,6 +34,28 @@ def test_curate_video_formats_picks_largest_filesize_per_height() -> None:
     assert by_height[480] == "c"
 
 
+def test_curate_video_formats_prefers_avc1_over_vp9_even_if_smaller() -> None:
+    # Live-verified bug: a VP9 stream remuxed (not re-encoded) into MP4
+    # played as audio-only/black-screen on a real Telegram desktop client.
+    # avc1 (H.264) must win even when the VP9 alternative has a larger file.
+    formats = [
+        _fmt(format_id="244", height=480, filesize_bytes=20_000_000, vcodec="vp9"),
+        _fmt(format_id="135", height=480, filesize_bytes=8_000_000, vcodec="avc1.4d401f"),
+    ]
+    curated = curate_video_formats(formats)
+    assert len(curated) == 1
+    assert curated[0].format_id == "135"
+
+
+def test_curate_video_formats_falls_back_to_vp9_when_no_avc1_available() -> None:
+    formats = [
+        _fmt(format_id="244", height=480, filesize_bytes=20_000_000, vcodec="vp9"),
+        _fmt(format_id="243", height=360, filesize_bytes=10_000_000, vcodec="vp9"),
+    ]
+    curated = curate_video_formats(formats)
+    assert {f.format_id for f in curated} == {"244", "243"}
+
+
 def test_curate_video_formats_excludes_audio_only_and_unknown_height() -> None:
     formats = [
         _fmt(format_id="audio", height=None, vcodec="none", acodec="aac"),

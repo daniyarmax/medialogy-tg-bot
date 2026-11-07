@@ -98,7 +98,9 @@ class Task(Base):
     source_url: Mapped[str | None] = mapped_column(Text)
     source_file_id: Mapped[str | None] = mapped_column(String(255))
     platform: Mapped[str | None] = mapped_column(String(50))
-    requested_format: Mapped[str | None] = mapped_column(String(20))
+    # yt-dlp format selectors can be longer than a plain numeric ID (e.g.
+    # "243+bestaudio", or some extractors' longer DASH format strings).
+    requested_format: Mapped[str | None] = mapped_column(String(100))
     requested_bitrate: Mapped[str | None] = mapped_column(String(10))
 
     status: Mapped[TaskStatus] = mapped_column(

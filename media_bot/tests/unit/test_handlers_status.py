@@ -78,6 +78,38 @@ async def test_cmd_cancel_cancels_most_recent_active_task() -> None:
     assert task_id in message._answered[0]
 
 
+async def test_cmd_cancel_revokes_the_celery_task_when_dispatched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user_repo = AsyncMock()
+    user_repo.get_by_telegram_id.return_value = SimpleNamespace(id=42)
+    task_repo = AsyncMock()
+    task_id = "33333333-3333-3333-3333-333333333333"
+    task_repo.list_active_for_user.return_value = [
+        Task(
+            id=task_id,
+            user_id=42,
+            operation=TaskOperation.download_video,
+            status=TaskStatus.downloading,
+            celery_task_id=task_id,
+        )
+    ]
+    revoke_calls = []
+    monkeypatch.setattr(
+        status_handlers.celery_app.control,
+        "revoke",
+        lambda *args, **kwargs: revoke_calls.append((args, kwargs)),
+    )
+    message = _fake_message()
+
+    await status_handlers.cmd_cancel(message, task_repo, user_repo)
+
+    assert len(revoke_calls) == 1
+    args, kwargs = revoke_calls[0]
+    assert args[0] == task_id
+    assert kwargs["terminate"] is True
+
+
 async def test_my_downloads_lists_recent_history() -> None:
     user_repo = AsyncMock()
     user_repo.get_by_telegram_id.return_value = SimpleNamespace(id=42)

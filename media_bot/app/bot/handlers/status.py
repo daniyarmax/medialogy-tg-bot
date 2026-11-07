@@ -4,6 +4,7 @@ from aiogram.types import Message
 
 from app.bot.keyboards.main_menu import BTN_MY_DOWNLOADS
 from app.database.models import TaskStatus
+from app.workers.celery_app import celery_app
 
 router = Router(name="status")
 
@@ -40,6 +41,11 @@ async def cmd_cancel(message: Message, task_repo, user_repo) -> None:
         return
 
     most_recent = active[0]
+    if most_recent.celery_task_id:
+        # terminate=True sends SIGTERM to the worker process actually
+        # running this task (not just removing it from the queue), which
+        # kills the yt-dlp/ffmpeg subprocess it's waiting on too.
+        celery_app.control.revoke(most_recent.celery_task_id, terminate=True, signal="SIGTERM")
     await task_repo.set_status(most_recent.id, TaskStatus.cancelled)
     await message.answer(f"Cancelled task <code>{most_recent.id}</code>.")
 

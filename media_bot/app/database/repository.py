@@ -17,6 +17,9 @@ class UserRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get(self, user_id: int) -> User | None:
+        return await self.session.get(User, user_id)
+
     async def get_or_create(
         self,
         telegram_user_id: int,
@@ -80,6 +83,8 @@ class TaskRepository:
         error_code: str | None = None,
         started_at: datetime | None = None,
         completed_at: datetime | None = None,
+        result_file_path: str | None = None,
+        result_file_size_bytes: int | None = None,
     ) -> None:
         task = await self.get(task_id)
         if task is None:
@@ -91,6 +96,10 @@ class TaskRepository:
             task.stage_detail = stage_detail
         if error_message is not None:
             task.error_message = error_message
+        if result_file_path is not None:
+            task.result_file_path = result_file_path
+        if result_file_size_bytes is not None:
+            task.result_file_size_bytes = result_file_size_bytes
         if error_code is not None:
             task.error_code = error_code
         if started_at is not None:

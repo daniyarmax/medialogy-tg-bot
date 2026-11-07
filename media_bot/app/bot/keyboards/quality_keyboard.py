@@ -25,15 +25,41 @@ def _human_size(num_bytes: int | None) -> str:
     return f"{num_bytes:.1f}TB"
 
 
+def _codec_compat_priority(vcodec: str | None) -> int:
+    """Lower is more compatible. H.264 (avc1) muxes into MP4 cleanly and
+    plays everywhere; VP9/AV1 remuxed into MP4 (not re-encoded) is valid
+    per spec but several real players — including, confirmed live, the
+    Telegram desktop client on macOS — render it as a black screen with
+    audio only. Preferring avc1 avoids that without the cost of a real
+    re-encode.
+    """
+    if not vcodec:
+        return 2
+    vcodec = vcodec.lower()
+    if vcodec.startswith("avc1") or vcodec.startswith("h264"):
+        return 0
+    return 1
+
+
 def curate_video_formats(formats: list[FormatOption]) -> list[FormatOption]:
-    """Pick the single best format per resolution, highest resolution first."""
+    """Pick the single best format per resolution: prefer H.264 (avc1) for
+    playback compatibility, then the largest file at that resolution.
+    """
     best_by_height: dict[int, FormatOption] = {}
     for fmt in formats:
         if not fmt.has_video or fmt.height is None:
             continue
         current = best_by_height.get(fmt.height)
-        current_size = (current.filesize_bytes or 0) if current else -1
-        if current is None or (fmt.filesize_bytes or 0) > current_size:
+        if current is None:
+            best_by_height[fmt.height] = fmt
+            continue
+
+        current_priority = _codec_compat_priority(current.vcodec)
+        fmt_priority = _codec_compat_priority(fmt.vcodec)
+        if fmt_priority < current_priority or (
+            fmt_priority == current_priority
+            and (fmt.filesize_bytes or 0) > (current.filesize_bytes or 0)
+        ):
             best_by_height[fmt.height] = fmt
 
     ordered = sorted(best_by_height.values(), key=lambda f: f.height or 0, reverse=True)

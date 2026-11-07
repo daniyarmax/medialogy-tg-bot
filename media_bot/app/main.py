@@ -44,7 +44,7 @@ async def main() -> None:
     logger.info("bot_starting", api_mode=settings.telegram.api_mode)
     await bot.delete_webhook(drop_pending_updates=True)
     try:
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, redis=redis)
     finally:
         await redis.aclose()
         await bot.session.close()

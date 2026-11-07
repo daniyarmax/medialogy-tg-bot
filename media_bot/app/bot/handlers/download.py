@@ -1,9 +1,11 @@
+import asyncio
 import re
 
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from redis.asyncio import Redis
 
 from app.bot.keyboards.main_menu import BTN_DOWNLOAD_VIDEO
 from app.bot.keyboards.quality_keyboard import (
@@ -12,12 +14,14 @@ from app.bot.keyboards.quality_keyboard import (
     curate_video_formats,
     format_selector_for_id,
 )
+from app.bot.progress_poller import poll_task_progress
 from app.bot.states.flows import DownloadFlow
 from app.core.config import get_settings
 from app.core.exceptions import DurationExceededError, MediaBotError
 from app.database.models import TaskOperation
 from app.downloader.metadata import probe_metadata
 from app.services.task_service import admit_and_create_task
+from app.workers.celery_app import celery_app
 
 router = Router(name="download")
 
@@ -71,7 +75,9 @@ async def receive_download_url(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(DownloadFlow.choosing_quality, F.data.startswith(f"{CALLBACK_PREFIX}:"))
-async def choose_quality(callback: CallbackQuery, state: FSMContext, user_repo, task_repo) -> None:
+async def choose_quality(
+    callback: CallbackQuery, state: FSMContext, user_repo, task_repo, redis: Redis
+) -> None:
     assert callback.data is not None and callback.message is not None
     format_id = callback.data.split(":", 1)[1]
     data = await state.get_data()
@@ -102,9 +108,19 @@ async def choose_quality(callback: CallbackQuery, state: FSMContext, user_repo, 
         await state.clear()
         return
 
+    task.celery_task_id = str(task.id)
+    # Commit before dispatching: the worker picks this up on its own DB
+    # connection almost immediately, and under READ COMMITTED it can't see
+    # a row this session hasn't committed yet - dispatching first caused a
+    # real race where the task ran and found no matching row.
+    await task_repo.session.commit()
+    celery_app.send_task("tasks.download_video", args=[str(task.id)], task_id=str(task.id))
+
     await callback.answer("Queued!")
-    await callback.message.edit_text(
-        f"✅ Queued <b>{data['title']}</b> for download (task <code>{task.id}</code>).\n"
-        "I'll notify you once it's ready."
+    await callback.message.edit_text(f"🎬 Downloading <b>{data['title']}</b>...")
+    asyncio.create_task(
+        poll_task_progress(
+            callback.bot, callback.message.chat.id, callback.message.message_id, str(task.id), redis
+        )
     )
     await state.clear()

@@ -1,6 +1,9 @@
+import asyncio
+
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from redis.asyncio import Redis
 
 from app.bot.keyboards.audio_format_keyboard import (
     BITRATE_CALLBACK_PREFIX,
@@ -11,12 +14,14 @@ from app.bot.keyboards.audio_format_keyboard import (
     needs_bitrate_choice,
 )
 from app.bot.keyboards.main_menu import BTN_EXTRACT_AUDIO
+from app.bot.progress_poller import poll_task_progress
 from app.bot.states.flows import AudioFlow
 from app.core.config import get_settings
 from app.core.exceptions import DurationExceededError, FileTooLargeError, MediaBotError
 from app.database.models import TaskOperation
 from app.downloader.metadata import probe_metadata
 from app.services.task_service import admit_and_create_task
+from app.workers.celery_app import celery_app
 
 router = Router(name="audio")
 
@@ -79,7 +84,9 @@ async def receive_audio_file(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(AudioFlow.choosing_format, F.data.startswith(f"{FORMAT_CALLBACK_PREFIX}:"))
-async def choose_audio_format(callback: CallbackQuery, state: FSMContext, user_repo, task_repo) -> None:
+async def choose_audio_format(
+    callback: CallbackQuery, state: FSMContext, user_repo, task_repo, redis: Redis
+) -> None:
     assert callback.data is not None and callback.message is not None
     target_format = callback.data.split(":", 1)[1]
     if target_format not in AUDIO_FORMATS:
@@ -95,16 +102,20 @@ async def choose_audio_format(callback: CallbackQuery, state: FSMContext, user_r
         )
         return
 
-    await _finalize_audio_task(callback, state, user_repo, task_repo, target_format, None)
+    await _finalize_audio_task(callback, state, user_repo, task_repo, redis, target_format, None)
 
 
 @router.callback_query(AudioFlow.choosing_bitrate, F.data.startswith(f"{BITRATE_CALLBACK_PREFIX}:"))
-async def choose_audio_bitrate(callback: CallbackQuery, state: FSMContext, user_repo, task_repo) -> None:
+async def choose_audio_bitrate(
+    callback: CallbackQuery, state: FSMContext, user_repo, task_repo, redis: Redis
+) -> None:
     assert callback.data is not None
     kbps = callback.data.split(":", 1)[1]
     data = await state.get_data()
     target_format = data.get("target_format")
-    await _finalize_audio_task(callback, state, user_repo, task_repo, target_format, f"{kbps}k")
+    await _finalize_audio_task(
+        callback, state, user_repo, task_repo, redis, target_format, f"{kbps}k"
+    )
 
 
 async def _finalize_audio_task(
@@ -112,6 +123,7 @@ async def _finalize_audio_task(
     state: FSMContext,
     user_repo,
     task_repo,
+    redis: Redis,
     target_format: str | None,
     requested_bitrate: str | None,
 ) -> None:
@@ -139,9 +151,17 @@ async def _finalize_audio_task(
         await state.clear()
         return
 
+    task.celery_task_id = str(task.id)
+    # Commit before dispatching - see the matching comment in
+    # handlers/download.py for why (a real race was found here live).
+    await task_repo.session.commit()
+    celery_app.send_task("tasks.extract_audio", args=[str(task.id)], task_id=str(task.id))
+
     await callback.answer("Queued!")
-    await callback.message.edit_text(
-        f"✅ Queued <b>{data.get('title')}</b> for audio extraction (task <code>{task.id}</code>).\n"
-        "I'll notify you once it's ready."
+    await callback.message.edit_text(f"🎵 Extracting audio from <b>{data.get('title')}</b>...")
+    asyncio.create_task(
+        poll_task_progress(
+            callback.bot, callback.message.chat.id, callback.message.message_id, str(task.id), redis
+        )
     )
     await state.clear()

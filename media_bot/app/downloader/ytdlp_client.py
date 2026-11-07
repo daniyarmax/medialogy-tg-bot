@@ -90,6 +90,14 @@ async def download(
         "-f", format_selector,
         "-o", output_template,
         "--no-playlist",
+        # yt-dlp defaults to MKV when merging separate video+audio streams;
+        # force MP4 (a fast remux, not a re-encode) since Telegram's
+        # sendVideo handles MP4/H.264 far more reliably for inline playback.
+        "--merge-output-format", "mp4",
+        # moov-atom-at-front is standard for "progressive"/streamable MP4
+        # and has been reported to fix Telegram's own player misrendering
+        # aspect ratio for muxed (not re-encoded) DASH video+audio merges.
+        "--postprocessor-args", "Merger:-movflags +faststart",
         "--newline",
         "--progress",  # force progress output even though stdout isn't a TTY
         "--progress-template",
