@@ -3,7 +3,7 @@ import socket
 import pytest
 
 from app.core.exceptions import SourceValidationError
-from app.core.security import sanitize_filename, validate_source_url
+from app.core.security import escape_html, sanitize_filename, validate_source_url
 
 
 def _fake_getaddrinfo(ip: str):
@@ -75,3 +75,16 @@ def test_sanitize_filename_strips_dangerous_characters() -> None:
 
 def test_sanitize_filename_falls_back_on_empty_result() -> None:
     assert sanitize_filename("???///") == "file"
+
+
+def test_escape_html_escapes_tags_and_ampersands() -> None:
+    # A title like this would otherwise make Telegram's HTML parser reject
+    # the whole message with "can't parse entities" - confirmed the real
+    # failure mode this guards against.
+    assert escape_html("<script>alert(1)</script> & Chill") == (
+        "&lt;script&gt;alert(1)&lt;/script&gt; &amp; Chill"
+    )
+
+
+def test_escape_html_leaves_plain_text_unchanged() -> None:
+    assert escape_html("Me at the zoo") == "Me at the zoo"

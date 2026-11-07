@@ -3,6 +3,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from app.bot.keyboards.main_menu import BTN_MY_DOWNLOADS
+from app.core.security import escape_html
 from app.database.models import TaskStatus
 from app.workers.celery_app import celery_app
 
@@ -64,5 +65,6 @@ async def my_downloads(message: Message, history_repo, user_repo) -> None:
 
     lines = ["<b>Your recent downloads:</b>"]
     for entry in entries:
-        lines.append(f"• {entry.title or 'Untitled'} ({entry.output_format or entry.operation.value})")
+        title = escape_html(entry.title) if entry.title else "Untitled"
+        lines.append(f"• {title} ({entry.output_format or entry.operation.value})")
     await message.answer("\n".join(lines))

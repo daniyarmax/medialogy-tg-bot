@@ -41,13 +41,23 @@ def _codec_compat_priority(vcodec: str | None) -> int:
     return 1
 
 
-def curate_video_formats(formats: list[FormatOption]) -> list[FormatOption]:
+def curate_video_formats(
+    formats: list[FormatOption], *, max_bytes: int | None = None
+) -> list[FormatOption]:
     """Pick the single best format per resolution: prefer H.264 (avc1) for
     playback compatibility, then the largest file at that resolution.
+
+    `max_bytes`, when given, drops any format whose *known* size already
+    exceeds it - rejecting an oversized quality before the user can even
+    pick it, rather than downloading it first and failing afterward. A
+    format with no reported size is kept (yt-dlp's own `--max-filesize`
+    and the post-download check remain the safety net for that case).
     """
     best_by_height: dict[int, FormatOption] = {}
     for fmt in formats:
         if not fmt.has_video or fmt.height is None:
+            continue
+        if max_bytes is not None and fmt.filesize_bytes and fmt.filesize_bytes > max_bytes:
             continue
         current = best_by_height.get(fmt.height)
         if current is None:

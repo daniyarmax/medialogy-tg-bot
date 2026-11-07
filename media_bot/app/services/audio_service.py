@@ -12,6 +12,7 @@ from aiogram.types import FSInputFile
 from app.bot.telegram_client import build_bot
 from app.core.config import get_settings
 from app.core.exceptions import FileTooLargeError, MediaBotError
+from app.core.limits import file_too_large_message
 from app.core.logging import get_logger
 from app.database.models import DownloadHistory, TaskStatus
 from app.database.repository import DownloadHistoryRepository, TaskRepository, UserRepository
@@ -20,6 +21,7 @@ from app.downloader.ytdlp_client import download as ytdlp_download
 from app.processor.audio_extractor import extract_audio
 from app.processor.ffmpeg import FFmpegProgress
 from app.services.cleanup import remove_directory_tree
+from app.services.disk_guard import check_disk_space
 from app.services.progress_publisher import publish_progress, publish_terminal
 
 logger = get_logger(__name__)
@@ -55,6 +57,8 @@ async def run_extract_audio_task(task_id: str) -> None:
     bot, limits = build_bot(settings)
 
     try:
+        check_disk_space(work_dir)
+
         if source_url:
             def on_download_progress(update) -> None:
                 publish_progress(
@@ -83,6 +87,10 @@ async def run_extract_audio_task(task_id: str) -> None:
             await TaskRepository(session).set_status(task_uuid, TaskStatus.processing)
             await session.commit()
 
+        # Now the actual source size is known - check again with real
+        # headroom (source + output could briefly coexist on disk).
+        check_disk_space(work_dir, source_path.stat().st_size * 2)
+
         bitrate_kbps = int(requested_bitrate.rstrip("k")) if requested_bitrate else None
         dest_path = work_dir / f"{task_id}.{target_format}"
 
@@ -101,10 +109,7 @@ async def run_extract_audio_task(task_id: str) -> None:
         file_size = result_path.stat().st_size
         if file_size > limits.max_upload_bytes:
             raise FileTooLargeError(
-                user_message=(
-                    f"The extracted audio is {file_size / 1024 / 1024:.0f}MB, which exceeds "
-                    f"the {limits.max_upload_bytes / 1024 / 1024:.0f}MB upload limit."
-                )
+                user_message=file_too_large_message(file_size, limits.max_upload_bytes)
             )
 
         async with sessionmaker() as session:

@@ -7,6 +7,7 @@ no dependency on the downloader package, so it can be unit tested in
 isolation and reused anywhere a URL needs vetting.
 """
 
+import html
 import ipaddress
 import socket
 from dataclasses import dataclass
@@ -129,3 +130,17 @@ def sanitize_filename(name: str, *, max_length: int = 150, default: str = "file"
     if not allowed:
         allowed = default
     return allowed[:max_length]
+
+
+def escape_html(text: str) -> str:
+    """Escape untrusted text (a video title, a user-sent file's name) before
+    interpolating it into a Telegram message sent with HTML parse mode.
+
+    Without this, a title containing bare `<`, `>`, or `&` makes
+    `sendMessage`/`editMessageText` fail outright with a
+    "can't parse entities" error from Telegram - this isn't a theoretical
+    XSS concern (Telegram's HTML subset isn't a browser), it's a plain
+    correctness bug where a platform-provided or attacker-chosen title can
+    break every message that embeds it.
+    """
+    return html.escape(text, quote=False)

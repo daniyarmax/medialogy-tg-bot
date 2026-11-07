@@ -56,6 +56,21 @@ def test_curate_video_formats_falls_back_to_vp9_when_no_avc1_available() -> None
     assert {f.format_id for f in curated} == {"244", "243"}
 
 
+def test_curate_video_formats_drops_formats_exceeding_max_bytes() -> None:
+    formats = [
+        _fmt(format_id="137", height=1080, filesize_bytes=500_000_000, vcodec="avc1"),
+        _fmt(format_id="135", height=480, filesize_bytes=10_000_000, vcodec="avc1"),
+    ]
+    curated = curate_video_formats(formats, max_bytes=50_000_000)
+    assert {f.format_id for f in curated} == {"135"}
+
+
+def test_curate_video_formats_keeps_formats_with_unknown_size_even_with_max_bytes() -> None:
+    formats = [_fmt(format_id="602", height=720, filesize_bytes=None, vcodec="avc1")]
+    curated = curate_video_formats(formats, max_bytes=1)
+    assert {f.format_id for f in curated} == {"602"}
+
+
 def test_curate_video_formats_excludes_audio_only_and_unknown_height() -> None:
     formats = [
         _fmt(format_id="audio", height=None, vcodec="none", acodec="aac"),

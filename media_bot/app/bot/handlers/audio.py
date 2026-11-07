@@ -17,7 +17,9 @@ from app.bot.keyboards.main_menu import BTN_EXTRACT_AUDIO
 from app.bot.progress_poller import poll_task_progress
 from app.bot.states.flows import AudioFlow
 from app.core.config import get_settings
-from app.core.exceptions import DurationExceededError, FileTooLargeError, MediaBotError
+from app.core.exceptions import DurationExceededError, MediaBotError
+from app.core.limits import duration_exceeded_message, file_too_large_message
+from app.core.security import escape_html
 from app.database.models import TaskOperation
 from app.downloader.metadata import probe_metadata
 from app.services.task_service import admit_and_create_task
@@ -42,7 +44,9 @@ async def receive_audio_url(message: Message, state: FSMContext) -> None:
         settings = get_settings()
         if meta.duration_seconds and meta.duration_seconds > settings.limits.max_duration_seconds:
             raise DurationExceededError(
-                f"{meta.duration_seconds}s exceeds the {settings.limits.max_duration_seconds}s limit"
+                user_message=duration_exceeded_message(
+                    meta.duration_seconds, settings.limits.max_duration_seconds
+                )
             )
     except MediaBotError as exc:
         await status_msg.edit_text(exc.user_message)
@@ -51,7 +55,8 @@ async def receive_audio_url(message: Message, state: FSMContext) -> None:
     await state.update_data(title=meta.title, source_url=url, platform=meta.platform.value, source_file_id=None)
     await state.set_state(AudioFlow.choosing_format)
     await status_msg.edit_text(
-        f"<b>{meta.title}</b>\n\nChoose an audio format:", reply_markup=build_audio_format_keyboard()
+        f"<b>{escape_html(meta.title)}</b>\n\nChoose an audio format:",
+        reply_markup=build_audio_format_keyboard(),
     )
 
 
@@ -64,22 +69,24 @@ async def receive_audio_file(message: Message, state: FSMContext) -> None:
 
     settings = get_settings()
     if duration and duration > settings.limits.max_duration_seconds:
-        await message.answer(
-            f"That's {duration}s long, which exceeds the {settings.limits.max_duration_seconds}s limit."
-        )
+        await message.answer(duration_exceeded_message(duration, settings.limits.max_duration_seconds))
         return
 
     bot_limits = getattr(message.bot, "media_bot_limits", None)
     if bot_limits is not None and bot_limits.max_download_bytes is not None and file_size:
         if file_size > bot_limits.max_download_bytes:
-            await message.answer(FileTooLargeError().user_message)
+            await message.answer(file_too_large_message(file_size, bot_limits.max_download_bytes))
             return
 
-    title = getattr(media, "file_name", None) or "Uploaded file"
+    # file_name is fully user-controlled (whatever they named the file on
+    # their own device) - truncate it and escape it for display like any
+    # other untrusted text going into an HTML-parse-mode message.
+    title = (getattr(media, "file_name", None) or "Uploaded file")[:200]
     await state.update_data(title=title, source_url=None, source_file_id=media.file_id, platform=None)
     await state.set_state(AudioFlow.choosing_format)
     await message.answer(
-        f"<b>{title}</b>\n\nChoose an audio format:", reply_markup=build_audio_format_keyboard()
+        f"<b>{escape_html(title)}</b>\n\nChoose an audio format:",
+        reply_markup=build_audio_format_keyboard(),
     )
 
 
@@ -158,7 +165,9 @@ async def _finalize_audio_task(
     celery_app.send_task("tasks.extract_audio", args=[str(task.id)], task_id=str(task.id))
 
     await callback.answer("Queued!")
-    await callback.message.edit_text(f"🎵 Extracting audio from <b>{data.get('title')}</b>...")
+    await callback.message.edit_text(
+        f"🎵 Extracting audio from <b>{escape_html(data.get('title') or '')}</b>..."
+    )
     asyncio.create_task(
         poll_task_progress(
             callback.bot, callback.message.chat.id, callback.message.message_id, str(task.id), redis

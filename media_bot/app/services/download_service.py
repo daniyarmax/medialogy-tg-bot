@@ -14,6 +14,7 @@ from aiogram.types import FSInputFile
 from app.bot.telegram_client import build_bot
 from app.core.config import get_settings
 from app.core.exceptions import FileTooLargeError, MediaBotError
+from app.core.limits import file_too_large_message
 from app.core.logging import get_logger
 from app.database.models import DownloadHistory, TaskStatus
 from app.database.repository import DownloadHistoryRepository, TaskRepository, UserRepository
@@ -21,6 +22,7 @@ from app.database.session import get_sessionmaker
 from app.downloader.ytdlp_client import ProgressUpdate, download as ytdlp_download
 from app.processor import media_info
 from app.services.cleanup import remove_directory_tree
+from app.services.disk_guard import check_disk_space
 from app.services.progress_publisher import publish_progress, publish_terminal
 
 logger = get_logger(__name__)
@@ -55,6 +57,11 @@ async def run_download_video_task(task_id: str) -> None:
     bot, limits = build_bot(settings)
 
     try:
+        # Loose pre-flight check: we don't know the exact output size yet
+        # (that's the whole point of downloading), so this just guards
+        # against starting work with almost no free space at all.
+        check_disk_space(work_dir)
+
         def on_progress(update: ProgressUpdate) -> None:
             publish_progress(
                 task_id,
@@ -76,10 +83,7 @@ async def run_download_video_task(task_id: str) -> None:
         file_size = result_path.stat().st_size
         if file_size > limits.max_upload_bytes:
             raise FileTooLargeError(
-                user_message=(
-                    f"The downloaded video is {file_size / 1024 / 1024:.0f}MB, which exceeds "
-                    f"the {limits.max_upload_bytes / 1024 / 1024:.0f}MB upload limit."
-                )
+                user_message=file_too_large_message(file_size, limits.max_upload_bytes)
             )
 
         async with sessionmaker() as session:

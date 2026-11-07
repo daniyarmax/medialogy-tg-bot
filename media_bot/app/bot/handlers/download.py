@@ -18,6 +18,8 @@ from app.bot.progress_poller import poll_task_progress
 from app.bot.states.flows import DownloadFlow
 from app.core.config import get_settings
 from app.core.exceptions import DurationExceededError, MediaBotError
+from app.core.limits import duration_exceeded_message
+from app.core.security import escape_html
 from app.database.models import TaskOperation
 from app.downloader.metadata import probe_metadata
 from app.services.task_service import admit_and_create_task
@@ -50,15 +52,21 @@ async def receive_download_url(message: Message, state: FSMContext) -> None:
         settings = get_settings()
         if meta.duration_seconds and meta.duration_seconds > settings.limits.max_duration_seconds:
             raise DurationExceededError(
-                f"{meta.duration_seconds}s exceeds the {settings.limits.max_duration_seconds}s limit"
+                user_message=duration_exceeded_message(
+                    meta.duration_seconds, settings.limits.max_duration_seconds
+                )
             )
     except MediaBotError as exc:
         await status_msg.edit_text(exc.user_message)
         return
 
-    curated = curate_video_formats(meta.formats)
+    max_bytes = settings.limits.max_file_size_mb * 1024 * 1024
+    curated = curate_video_formats(meta.formats, max_bytes=max_bytes)
     if not curated:
-        await status_msg.edit_text("I couldn't find any downloadable video formats for that link.")
+        await status_msg.edit_text(
+            "Every available quality for that link exceeds my size limit, or I couldn't "
+            "find any downloadable video formats for it."
+        )
         return
 
     await state.update_data(
@@ -70,7 +78,7 @@ async def receive_download_url(message: Message, state: FSMContext) -> None:
     await state.set_state(DownloadFlow.choosing_quality)
 
     duration_text = f"{meta.duration_seconds}s" if meta.duration_seconds else "unknown"
-    info_text = f"<b>{meta.title}</b>\nDuration: {duration_text}\n\nChoose a quality:"
+    info_text = f"<b>{escape_html(meta.title)}</b>\nDuration: {duration_text}\n\nChoose a quality:"
     await status_msg.edit_text(info_text, reply_markup=build_quality_keyboard(curated))
 
 
@@ -117,7 +125,7 @@ async def choose_quality(
     celery_app.send_task("tasks.download_video", args=[str(task.id)], task_id=str(task.id))
 
     await callback.answer("Queued!")
-    await callback.message.edit_text(f"🎬 Downloading <b>{data['title']}</b>...")
+    await callback.message.edit_text(f"🎬 Downloading <b>{escape_html(data['title'])}</b>...")
     asyncio.create_task(
         poll_task_progress(
             callback.bot, callback.message.chat.id, callback.message.message_id, str(task.id), redis
