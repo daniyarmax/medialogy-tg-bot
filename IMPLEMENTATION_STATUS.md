@@ -121,7 +121,22 @@ or a manual check actually performed, not just that code was written.
 
 ## Phase 6 — Reliability, Large-File & Security Hardening
 
-- **Status:** Not started
+- **Status:** Complete
+- **Date:** 2026-11-07
+- **What works (verified):**
+  - `app/services/disk_guard.py`: `check_disk_space()` — a loose pre-flight check (before download/extraction starts, since we don't know the output size yet) and a tighter one once the source file's actual size is known. Wired into both `download_service.py` and `audio_service.py`.
+  - `app/core/limits.py`: centralized user-facing wording for every limit (file-too-large, duration-exceeded, disk-space, processing-timeout), used consistently across both handlers and both services instead of ad-hoc inline f-strings.
+  - `quality_keyboard.curate_video_formats()` now takes `max_bytes` and drops any quality whose *known* size already exceeds the limit — an oversized selection is rejected before download starts, not after. Formats with unknown size are kept (yt-dlp's `--max-filesize` + the post-download check remain the safety net for those).
+  - **Security audit** (exactly what the plan called for): `grep -rn "shell=True" app/` → clean; `grep -rn "subprocess\.run\|subprocess\.Popen\|create_subprocess_shell" app/` → clean; confirmed every production subprocess call is list-form `asyncio.create_subprocess_exec`.
+  - **Real bug found during that audit:** `sanitize_filename()` existed since Phase 1 but was never actually called anywhere. More importantly, untrusted text (platform-provided video titles, and fully user-controlled Telegram-sent file names) was being interpolated directly into HTML-parse-mode messages with zero escaping — a title containing a bare `<`, `>`, or `&` makes `sendMessage`/`editMessageText` fail outright ("can't parse entities"), a plain correctness bug, not a theoretical one. Added `security.escape_html()` and applied it at every title-interpolation site (`handlers/download.py`, `handlers/audio.py`, `handlers/status.py`'s "My Downloads" listing). Covered by 2 new unit tests, including one asserting the exact escaped output for a `<script>`-containing title.
+  - `tests/load/test_audio_memory.py`: proves `audio_extractor` doesn't buffer its source in memory. **Measured peak ffmpeg subprocess RSS: 16.2MB for a 10-second synthetic clip vs. 17.5MB for a 2-hour one** — both generated on the fly via `ffmpeg -f lavfi` (never downloaded or checked in), confirming flat memory regardless of duration. Excluded from the default test run via the `testpaths` already set in `pyproject.toml`; run explicitly via `pytest tests/load -v`.
+  - **Manual verification of each limit**, beyond the automated tests:
+    - Duration-exceeded message confirmed to read correctly at the real 5-hour default (`"That's 360 minutes long, which exceeds the 5.0-hour limit..."`).
+    - An artificially tiny `max_bytes` correctly dropped every meaningfully-sized quality option from a real probed video's format list, confirming the picker-level rejection actually works against live data, not just mocks.
+    - `disk_guard.check_disk_space()` confirmed to pass under real available disk space, and to correctly raise `DiskSpaceError` with a clean, non-crashing message when forced to demand far more than any real disk has (10TB).
+  - `pytest tests/unit tests/integration -v` → **107/107 passed**; the load test passes separately.
+- **Known gaps:** None for this phase's scope. The periodic `cleanup_temp_task` (built in Phase 5) already serves as the backstop for the one known Phase 5 gap (a SIGTERM-cancelled task's partial file isn't cleaned up immediately) — no further action needed here.
+- **Next phase prerequisites:** None blocking.
 
 ## Phase 7 — Deployment
 
